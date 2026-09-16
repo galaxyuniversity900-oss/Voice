@@ -1,28 +1,75 @@
 # Voice
 
-Hardware-adaptive, Arabic-first voice platform with a mobile web client and pluggable TTS execution layer.
+Hardware-adaptive, Arabic-first voice platform with a mobile web client and a real Egyptian Arabic TTS runtime.
 
-## Goals
+## Runtime
 
-- **Low-resource first:** route work across local GPU, quantized, CPU, and remote execution paths.
-- **Arabic dialects as first-class data:** language and dialect are separate; `ar-EG` (Egyptian Arabic) is included alongside regional profiles.
-- **Production-safe integration:** the core never pretends that a dialect registry is a speech model. Real audio generation requires a configured, licensed TTS runtime/model.
-- **Mobile-ready:** the frontend is a lightweight responsive client suitable for Android browsers and thin-wrapper apps.
+The default Egyptian runtime is **KemeTone** (`Rabe3/kemetone`): an 82M-parameter, 24 kHz Egyptian/Cairene Arabic model with an Apache-2.0 license. Its published model card states that it runs on CPU or CUDA GPU and that the model weights are about 327 MB. The runtime downloads the model from Hugging Face on first synthesis and caches it locally; weights are never committed to this repository.
+
+KemeTone is intentionally used as one concrete production engine behind the replaceable `VoiceEngine` contract. It is a single female voice and is optimized for Cairene Egyptian Arabic. Diacritics are preserved for `ar-EG` because the model card notes that they materially improve vowel pronunciation.
 
 ## Architecture
 
 ```text
-Client (mobile/web)
-        |
-        v
-FastAPI API -> Arabic preprocessing -> hardware router -> engine registry
-                                                   |-> local
-                                                   |-> GGUF/quantized
-                                                   |-> CPU
-                                                   `-> remote worker
+Mobile/Web Client
+       |
+       v
+FastAPI API
+       |
+Arabic preprocessing (preserve ar-EG diacritics)
+       |
+Hardware router
+       |
+KemeTone engine -> first-run online model download -> local cache -> WAV
 ```
 
-The engine contract (`backend/engines/base.py`) keeps model/runtime integrations replaceable. The default deployment intentionally reports a clear `tts_engine_not_configured` response instead of generating fake audio.
+The model itself is online-downloadable and lazy-loaded: installing the application does not place 327 MB of weights in Git. The first `/api/synthesize` request downloads and caches the required model assets.
+
+## Install
+
+Core API only:
+
+```bash
+pip install -e '.[dev]'
+```
+
+Real Egyptian TTS:
+
+```bash
+pip install -e '.[tts]'
+```
+
+KemeTone's published requirements use `kokoro`, PyTorch, soundfile and NumPy. Its phonemiser also requires the system `espeak-ng` library. On Debian/Ubuntu:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y espeak-ng
+```
+
+Then:
+
+```bash
+uvicorn backend.app:app --host 0.0.0.0 --port 8000
+```
+
+Open `/` for the mobile-first Arabic client.
+
+## First synthesis
+
+Use Egyptian Arabic (`ar-eg`). The first generation downloads the KemeTone model assets from Hugging Face. Subsequent generations use the local cache.
+
+```bash
+curl -X POST http://localhost:8000/api/synthesize \
+  -H 'content-type: application/json' \
+  -d '{"text":"النَّهَارْدَه الْجَوّ حِلْو أَوِي","dialect":"ar-eg","language":"ar","speed":1.0}' \
+  --output voice.wav
+```
+
+Environment variables:
+
+- `VOICE_KEMETONE_MODEL` — model repository, default `Rabe3/kemetone`.
+- `VOICE_MODEL_CACHE` — local Hugging Face cache root, default `~/.cache/voice/models`.
+- `VOICE_OUTPUT_DIR` — generated WAV directory, default `./outputs`.
 
 ## API
 
@@ -31,18 +78,15 @@ The engine contract (`backend/engines/base.py`) keeps model/runtime integrations
 - `POST /api/prepare`
 - `GET /api/system/capabilities`
 - `GET /api/engine/route`
-- `POST /api/synthesize`
+- `POST /api/synthesize` → WAV audio
 
-## Run
+## Hardware routing
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e '.[dev]'
-uvicorn backend.app:app --reload
-```
+The router prefers a local GPU on capable machines and falls back to the lightweight KemeTone CPU path for lower-resource systems. Extremely constrained machines remain eligible for a future remote-worker path rather than pretending that local inference is safe.
 
-Open `/` for the mobile-first Arabic client.
+## Egyptian Arabic limitations
+
+KemeTone is Cairo/Egyptian focused, single-speaker, conversational-neutral, and does not provide multi-speaker cloning. It also expects Egyptian Arabic rather than generic MSA. Long text should be split at sentence boundaries.
 
 ## Tests
 
@@ -50,12 +94,8 @@ Open `/` for the mobile-first Arabic client.
 pytest -q
 ```
 
-GitHub Actions runs the test suite on pushes and pull requests.
+GitHub Actions runs the core test suite on pushes and pull requests. TTS model downloads are intentionally not performed in CI.
 
-## Egyptian Arabic
+## Responsible use
 
-`ar-EG` currently provides locale identity plus conservative preprocessing. High-quality Egyptian pronunciation, prosody, speaker adaptation, and code-switching require an actual compatible model/adapter or provider; those components are intentionally isolated behind the engine contract rather than being simulated by string replacement.
-
-## Voice cloning and model licensing
-
-Use voice cloning only with the speaker's permission and follow the license/terms of every model, runtime, and provider used in deployment.
+Use synthetic speech and voice cloning only with appropriate permission and in compliance with the model license and applicable law. KemeTone's model card specifically asks users not to impersonate the modeled person and to disclose synthetic speech where listeners could otherwise mistake it for human audio.
