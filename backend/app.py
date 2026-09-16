@@ -6,17 +6,22 @@ from pydantic import BaseModel, Field
 
 from .dialect_pipeline import preprocess
 from .dialects import ARABIC_DIALECTS
+from .engines.defaults import build_registry
+from .engines.router import route_engine
 from .hardware import HardwareProfile, select_engine
 from .hardware_probe import detect_hardware
 from .frontend import FRONTEND_DIR
 
-app = FastAPI(title="Voice API", version="0.2.0")
+app = FastAPI(title="Voice API", version="0.3.0")
+registry = build_registry()
 
 
 class SynthesisRequest(BaseModel):
     text: str = Field(min_length=1, max_length=10000)
     language: str = "ar"
     dialect: str = "ar-eg"
+    voice: str | None = None
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
 
 
 @app.get("/health")
@@ -45,13 +50,34 @@ def capabilities():
         "hardware": hw.__dict__,
         "recommended_backend": target.backend,
         "reason": target.reason,
+        "registered_engines": registry.names(),
+        "available_engines": registry.available(),
     }
 
 
 @app.get("/api/engine/route")
-def route(gpu_vram_mb: int = 0, ram_mb: int = 4096, cpu_threads: int = 4, remote_available: bool = True):
-    target = select_engine(HardwareProfile(gpu_vram_mb, ram_mb, cpu_threads), remote_available)
-    return {"backend": target.backend, "reason": target.reason}
+def route():
+    hw = detect_hardware()
+    routed = route_engine(registry, hw, remote_available=True)
+    return {"backend": routed.target, "engine": routed.engine.name}
+
+
+@app.post("/api/synthesize")
+def synthesize(req: SynthesisRequest):
+    prepared = preprocess(req.text, req.language, req.dialect)
+    hw = detect_hardware()
+    routed = route_engine(registry, hw, remote_available=True)
+    if not routed.engine.available():
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "tts_engine_not_configured",
+                "message": "No licensed TTS runtime/model is configured on this deployment.",
+                "prepared": prepared,
+                "recommended_backend": routed.target,
+            },
+        )
+    raise HTTPException(status_code=501, detail="Configured engine integration is incomplete")
 
 
 @app.get("/", include_in_schema=False)
