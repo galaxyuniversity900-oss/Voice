@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Voice Studio</title>
+  <style>
+    :root{font-family:system-ui,sans-serif;color-scheme:dark}body{margin:0;background:#101114;color:#f5f5f5}main{max-width:760px;margin:auto;padding:24px}textarea,select,button{width:100%;box-sizing:border-box;margin-top:10px;padding:13px;border:1px solid #363940;border-radius:10px;background:#191b20;color:inherit;font:inherit}textarea{min-height:220px;resize:vertical}button{cursor:pointer;background:#f5f5f5;color:#111;font-weight:700}pre{white-space:pre-wrap;background:#191b20;padding:14px;border-radius:10px;overflow:auto}audio{width:100%;margin-top:16px}.meta{opacity:.75;font-size:.9rem}</style>
+</head>
+<body>
+<main>
+  <h1>Voice Studio</h1>
+  <p class="meta">Arabic-first, hardware-adaptive voice pipeline</p>
+  <label for="dialect">اللهجة</label>
+  <select id="dialect"><option value="ar-eg">العربية المصرية</option><option value="ar-msa">العربية الفصحى</option><option value="ar-gulf">العربية الخليجية</option><option value="ar-sa">العربية السعودية</option></select>
+  <textarea id="text" placeholder="اكتب النص هنا..."></textarea>
+  <button id="prepare">تجهيز النص</button>
+  <pre id="result">جاهز</pre>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+$('prepare').onclick=async()=>{
+  const response=await fetch('/api/prepare',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:$('text').value,dialect:$('dialect').value,language:'ar'})});
+  const data=await response.json();$('result').textContent=response.ok?data.text:(data.detail||'حدث خطأ');
+};
+</script>
+</body>
+</html>
