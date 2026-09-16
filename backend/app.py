@@ -12,9 +12,11 @@ from .engines.router import route_engine
 from .hardware import select_engine
 from .hardware_probe import detect_hardware
 from .frontend import FRONTEND_DIR
+from .providers.ai_gateway import AIGateway
 
-app = FastAPI(title="Voice API", version="0.4.0")
+app = FastAPI(title="Voice API", version="0.5.0")
 registry = build_registry()
+ai_gateway = AIGateway()
 
 
 class SynthesisRequest(BaseModel):
@@ -23,6 +25,12 @@ class SynthesisRequest(BaseModel):
     dialect: str = "ar-eg"
     voice: str | None = None
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
+
+
+class AIChatRequest(BaseModel):
+    provider: str
+    messages: list[dict[str, str]] = Field(min_length=1)
+    temperature: float = Field(default=0.2, ge=0, le=2)
 
 
 @app.get("/health")
@@ -43,6 +51,31 @@ def prepare(req: SynthesisRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.get("/api/ai/providers")
+def ai_providers():
+    return {"configured": ai_gateway.configured(), "providers": ["nvidia", "unikey"]}
+
+
+@app.get("/api/ai/{provider}/models")
+def ai_models(provider: str):
+    try:
+        return {"provider": provider, "models": ai_gateway.models(provider)}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception:
+        raise HTTPException(status_code=503, detail="AI provider is unavailable")
+
+
+@app.post("/api/ai/chat")
+def ai_chat(req: AIChatRequest):
+    try:
+        return ai_gateway.chat(req.provider, req.messages, req.temperature)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception:
+        raise HTTPException(status_code=503, detail="AI provider is unavailable")
+
+
 @app.get("/api/system/capabilities")
 def capabilities():
     hw = detect_hardware()
@@ -53,6 +86,7 @@ def capabilities():
         "reason": target.reason,
         "registered_engines": registry.names(),
         "available_engines": registry.available(),
+        "ai_providers": ai_gateway.configured(),
     }
 
 
@@ -78,37 +112,22 @@ def synthesize(req: SynthesisRequest):
                     "recommended_backend": routed.target,
                 },
             )
-
         result = routed.engine.synthesize(
             prepared["text"],
-            SynthesisOptions(
-                language=req.language,
-                dialect=req.dialect,
-                voice=req.voice,
-                speed=req.speed,
-            ),
+            SynthesisOptions(language=req.language, dialect=req.dialect, voice=req.voice, speed=req.speed),
         )
         return FileResponse(
             result.audio_path,
             media_type="audio/wav",
             filename="voice.wav",
-            headers={
-                "X-Voice-Engine": result.backend,
-                "X-Voice-Sample-Rate": str(result.sample_rate),
-            },
+            headers={"X-Voice-Engine": result.backend, "X-Voice-Sample-Rate": str(result.sample_rate)},
         )
     except HTTPException:
         raise
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "tts_runtime_error",
-                "message": str(exc),
-            },
-        ) from exc
+    except Exception:
+        raise HTTPException(status_code=503, detail={"code": "tts_runtime_error", "message": "TTS runtime unavailable"})
 
 
 @app.get("/", include_in_schema=False)
