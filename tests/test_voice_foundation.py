@@ -23,6 +23,17 @@ def test_arabic_digits_are_preprocessed():
     assert result["text"] == "السعر 125 جنيه؟"
 
 
+def test_egyptian_diacritics_are_preserved():
+    result = preprocess("النَّهَارْدَه الْجَوّ حِلْو أَوِي", "ar", "ar-eg")
+    assert "النَّهَارْدَه" in result["text"]
+    assert "حِلْو" in result["text"]
+
+
+def test_non_egyptian_normalization_removes_diacritics():
+    result = preprocess("مَرْحَبًا", "ar", "ar-msa")
+    assert result["text"] == "مرحبا"
+
+
 def test_hardware_routing_has_low_resource_path():
     assert select_engine(HardwareProfile(ram_mb=2048), True).backend == "cpu"
     assert select_engine(HardwareProfile(ram_mb=1024), True).backend == "remote"
@@ -31,4 +42,4 @@ def test_hardware_routing_has_low_resource_path():
 def test_prepare_endpoint():
     response = client.post("/api/prepare", json={"text": "أهلاً يا صاحبي", "dialect": "ar-eg"})
     assert response.status_code == 200
-    assert response.json()["dialect"]["locale"] == "ar-EG"
+    assert response.json()["dialect"] == "ar-EG"
