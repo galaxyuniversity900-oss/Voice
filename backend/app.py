@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .dialect_pipeline import preprocess
-from .dialects import ARABIC_DIALECTS, get_dialect
+from .dialects import ARABIC_DIALECTS
 from .hardware import HardwareProfile, select_engine
 from .hardware_probe import detect_hardware
+from .frontend import FRONTEND_DIR
 
 app = FastAPI(title="Voice API", version="0.2.0")
 
@@ -50,3 +52,8 @@ def capabilities():
 def route(gpu_vram_mb: int = 0, ram_mb: int = 4096, cpu_threads: int = 4, remote_available: bool = True):
     target = select_engine(HardwareProfile(gpu_vram_mb, ram_mb, cpu_threads), remote_available)
     return {"backend": target.backend, "reason": target.reason}
+
+
+@app.get("/", include_in_schema=False)
+def frontend():
+    return FileResponse(FRONTEND_DIR / "index.html")
