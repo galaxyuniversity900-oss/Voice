@@ -14,11 +14,7 @@ SAMPLE_RATE = 24000
 
 
 class KemeToneEngine:
-    """Lazy, online-downloaded Egyptian Arabic KemeTone runtime.
-
-    The 327 MB model is downloaded from Hugging Face on first synthesis and
-    cached locally. No model weights are committed to this repository.
-    """
+    """Lazy, online-downloaded Egyptian Arabic KemeTone runtime."""
 
     name = "kemetone"
     _lock = threading.Lock()
@@ -69,8 +65,8 @@ class KemeToneEngine:
             device = "cuda" if torch.cuda.is_available() else "cpu"
             model = KModel(
                 repo_id=MODEL_ID,
-                config="config.json",
-                model="kemetone.pth",
+                config=str(model_dir / "config.json"),
+                model=str(model_dir / "kemetone.pth"),
             ).to(device).eval()
             voice = torch.load(model_dir / "voices" / "kemetone.pt", map_location=device)
 
@@ -99,7 +95,7 @@ class KemeToneEngine:
         output_dir = Path(os.getenv("VOICE_OUTPUT_DIR", "./outputs")).resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / "voice.wav"
-        tmp_path = output_dir / "voice.wav.tmp"
-        sf.write(tmp_path, audio.detach().cpu().numpy(), SAMPLE_RATE)
+        tmp_path = output_dir / "voice.tmp.wav"
+        sf.write(tmp_path, audio.detach().cpu().numpy(), SAMPLE_RATE, format="WAV")
         os.replace(tmp_path, output_path)
         return AudioResult(output_path, SAMPLE_RATE, self.name)
