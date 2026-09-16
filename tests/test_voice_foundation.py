@@ -43,3 +43,29 @@ def test_prepare_endpoint():
     response = client.post("/api/prepare", json={"text": "أهلاً يا صاحبي", "dialect": "ar-eg"})
     assert response.status_code == 200
     assert response.json()["dialect"] == "ar-EG"
+
+
+def test_ai_providers_endpoint_hides_secrets(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "secret")
+    monkeypatch.setenv("UNIKEY_API_KEY", "secret")
+    response = client.get("/api/ai/providers")
+    assert response.status_code == 200
+    assert response.json()["configured"] == ["nvidia", "unikey"]
+    assert "secret" not in response.text
+
+
+def test_ai_chat_requires_configured_provider(monkeypatch):
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    response = client.post(
+        "/api/ai/chat",
+        json={"provider": "nvidia", "messages": [{"role": "user", "content": "hello"}]},
+    )
+    assert response.status_code == 503
+
+
+def test_unknown_ai_provider():
+    response = client.post(
+        "/api/ai/chat",
+        json={"provider": "unknown", "messages": [{"role": "user", "content": "hello"}]},
+    )
+    assert response.status_code == 404
