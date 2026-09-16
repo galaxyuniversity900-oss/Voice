@@ -6,13 +6,14 @@ from pydantic import BaseModel, Field
 
 from .dialect_pipeline import preprocess
 from .dialects import ARABIC_DIALECTS
+from .engines.base import SynthesisOptions
 from .engines.defaults import build_registry
 from .engines.router import route_engine
-from .hardware import HardwareProfile, select_engine
+from .hardware import select_engine
 from .hardware_probe import detect_hardware
 from .frontend import FRONTEND_DIR
 
-app = FastAPI(title="Voice API", version="0.3.0")
+app = FastAPI(title="Voice API", version="0.4.0")
 registry = build_registry()
 
 
@@ -64,20 +65,50 @@ def route():
 
 @app.post("/api/synthesize")
 def synthesize(req: SynthesisRequest):
-    prepared = preprocess(req.text, req.language, req.dialect)
-    hw = detect_hardware()
-    routed = route_engine(registry, hw, remote_available=True)
-    if not routed.engine.available():
+    try:
+        prepared = preprocess(req.text, req.language, req.dialect)
+        hw = detect_hardware()
+        routed = route_engine(registry, hw, remote_available=True)
+        if not routed.engine.available():
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "tts_runtime_missing",
+                    "message": "Install the TTS extra: pip install -e '.[tts]'",
+                    "recommended_backend": routed.target,
+                },
+            )
+
+        result = routed.engine.synthesize(
+            prepared["text"],
+            SynthesisOptions(
+                language=req.language,
+                dialect=req.dialect,
+                voice=req.voice,
+                speed=req.speed,
+            ),
+        )
+        return FileResponse(
+            result.audio_path,
+            media_type="audio/wav",
+            filename="voice.wav",
+            headers={
+                "X-Voice-Engine": result.backend,
+                "X-Voice-Sample-Rate": str(result.sample_rate),
+            },
+        )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
         raise HTTPException(
             status_code=503,
             detail={
-                "code": "tts_engine_not_configured",
-                "message": "No licensed TTS runtime/model is configured on this deployment.",
-                "prepared": prepared,
-                "recommended_backend": routed.target,
+                "code": "tts_runtime_error",
+                "message": str(exc),
             },
-        )
-    raise HTTPException(status_code=501, detail="Configured engine integration is incomplete")
+        ) from exc
 
 
 @app.get("/", include_in_schema=False)
