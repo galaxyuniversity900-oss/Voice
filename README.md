@@ -4,7 +4,7 @@ Hardware-adaptive, Arabic-first voice platform with a mobile web client and a re
 
 ## Runtime
 
-The default Egyptian runtime is **KemeTone** (`Rabe3/kemetone`): an 82M-parameter, 24 kHz Egyptian/Cairene Arabic model with an Apache-2.0 license. Its published model card states that it runs on CPU or CUDA GPU and that the model weights are about 327 MB. The runtime downloads the model from Hugging Face on first synthesis and caches it locally; weights are never committed to this repository.
+The default Egyptian runtime is **KemeTone** (`Rabe3/kemetone`): an 82M-parameter, 24 kHz Egyptian/Cairene Arabic model with an Apache-2.0 license. Its published model card states that it runs on CPU or CUDA GPU and that the model weights are about 327 MB. The runtime downloads the required model assets from Hugging Face on first synthesis and caches them locally; weights are never committed to this repository.
 
 KemeTone is intentionally used as one concrete production engine behind the replaceable `VoiceEngine` contract. It is a single female voice and is optimized for Cairene Egyptian Arabic. Diacritics are preserved for `ar-EG` because the model card notes that they materially improve vowel pronunciation.
 
@@ -20,10 +20,10 @@ Arabic preprocessing (preserve ar-EG diacritics)
        |
 Hardware router
        |
-KemeTone engine -> first-run online model download -> local cache -> WAV
+KemeTone engine -> online asset download -> local cache -> WAV
 ```
 
-The model itself is online-downloadable and lazy-loaded: installing the application does not place 327 MB of weights in Git. The first `/api/synthesize` request downloads and caches the required model assets.
+The model is online-downloadable and lazy-loaded. Installing the application does not place model weights in Git. You can either let the first synthesis download them automatically or prefetch all required runtime assets before starting the API.
 
 ## Install
 
@@ -33,17 +33,27 @@ Core API only:
 pip install -e '.[dev]'
 ```
 
-Real Egyptian TTS:
+Real Egyptian TTS + online model prefetch:
+
+```bash
+bash scripts/bootstrap_tts.sh
+```
+
+Windows PowerShell:
+
+```powershell
+./scripts/bootstrap_tts.ps1
+```
+
+The bootstrap installs the TTS runtime dependencies, installs `espeak-ng` automatically on Debian/Ubuntu when package-manager permissions are available, and downloads the complete KemeTone asset set listed in `scripts/model-manifest.json`. The ~327 MB model weights stay in the local Hugging Face cache and are not stored in Git.
+
+If you prefer manual installation:
 
 ```bash
 pip install -e '.[tts]'
-```
-
-KemeTone's published requirements use `kokoro`, PyTorch, soundfile and NumPy. Its phonemiser also requires the system `espeak-ng` library. On Debian/Ubuntu:
-
-```bash
 sudo apt-get update
 sudo apt-get install -y espeak-ng
+python scripts/download_models.py
 ```
 
 Then:
@@ -56,7 +66,7 @@ Open `/` for the mobile-first Arabic client.
 
 ## First synthesis
 
-Use Egyptian Arabic (`ar-eg`). The first generation downloads the KemeTone model assets from Hugging Face. Subsequent generations use the local cache.
+Use Egyptian Arabic (`ar-eg`). If you already ran the bootstrap, the model is already cached. Otherwise the first generation downloads the KemeTone assets automatically.
 
 ```bash
 curl -X POST http://localhost:8000/api/synthesize \
@@ -94,7 +104,7 @@ KemeTone is Cairo/Egyptian focused, single-speaker, conversational-neutral, and 
 pytest -q
 ```
 
-GitHub Actions runs the core test suite on pushes and pull requests. TTS model downloads are intentionally not performed in CI.
+GitHub Actions runs the core test suite on pushes and pull requests. TTS model downloads are intentionally not performed in CI because the model is a large binary dependency.
 
 ## Responsible use
 
