@@ -1,0 +1,17 @@
+{
+  "provider": "huggingface",
+  "model_id": "Rabe3/kemetone",
+  "runtime": "kokoro + torch",
+  "sample_rate": 24000,
+  "language": "ar",
+  "dialect": "ar-EG",
+  "assets": [
+    "config.json",
+    "kemetone.pth",
+    "voices/kemetone.pt",
+    "kemetone/**"
+  ],
+  "cache_env": "VOICE_MODEL_CACHE",
+  "weights_are_not_committed": true,
+  "download_mode": "online-on-first-use-or-bootstrap"
+}
