@@ -1,12 +1,6 @@
 # Voice
 
-Hardware-adaptive, Arabic-first voice platform with a mobile web client and a real Egyptian Arabic TTS runtime.
-
-## Runtime
-
-The default Egyptian runtime is **KemeTone** (`Rabe3/kemetone`): an 82M-parameter, 24 kHz Egyptian/Cairene Arabic model with an Apache-2.0 license. Its published model card states that it runs on CPU or CUDA GPU and that the model weights are about 327 MB. The runtime downloads the required model assets from Hugging Face on first synthesis and caches them locally; weights are never committed to this repository.
-
-KemeTone is intentionally used as one concrete production engine behind the replaceable `VoiceEngine` contract. It is a single female voice and is optimized for Cairene Egyptian Arabic. Diacritics are preserved for `ar-EG` because the model card notes that they materially improve vowel pronunciation.
+Hardware-adaptive, Arabic-first voice platform with a mobile-first web client, Egyptian Arabic TTS, and a secure multi-provider AI gateway.
 
 ## Architecture
 
@@ -15,25 +9,31 @@ Mobile/Web Client
        |
        v
 FastAPI API
-       |
-Arabic preprocessing (preserve ar-EG diacritics)
+   |        |
+   |        +--> AI Gateway --> NVIDIA / UniKey
+   |
+Arabic preprocessing
        |
 Hardware router
        |
-KemeTone engine -> online asset download -> local cache -> WAV
+KemeTone TTS --> local model cache --> 24 kHz WAV
 ```
 
-The model is online-downloadable and lazy-loaded. Installing the application does not place model weights in Git. You can either let the first synthesis download them automatically or prefetch all required runtime assets before starting the API.
+## Egyptian Arabic TTS
 
-## Install
+The default runtime is **KemeTone** (`Rabe3/kemetone`): an 82M-parameter, 24 kHz Egyptian/Cairene Arabic model with an Apache-2.0 license. Model assets are downloaded online on first use or by the bootstrap scripts and cached locally; weights are never committed to Git.
 
-Core API only:
+KemeTone is a single-speaker Cairene model. It is not a general voice-cloning or multi-speaker engine. Egyptian Arabic (`ar-EG`) diacritics are preserved because they improve pronunciation. The current runtime intentionally exposes `speed=1.0` only because KemeTone's integration does not implement time-stretching.
+
+### Install
+
+Core API and tests:
 
 ```bash
 pip install -e '.[dev]'
 ```
 
-Real Egyptian TTS + online model prefetch:
+Real Egyptian TTS + model prefetch:
 
 ```bash
 bash scripts/bootstrap_tts.sh
@@ -45,9 +45,7 @@ Windows PowerShell:
 ./scripts/bootstrap_tts.ps1
 ```
 
-The bootstrap installs the TTS runtime dependencies, installs `espeak-ng` automatically on Debian/Ubuntu when package-manager permissions are available, and downloads the complete KemeTone asset set listed in `scripts/model-manifest.json`. The ~327 MB model weights stay in the local Hugging Face cache and are not stored in Git.
-
-If you prefer manual installation:
+Manual setup:
 
 ```bash
 pip install -e '.[tts]'
@@ -56,30 +54,41 @@ sudo apt-get install -y espeak-ng
 python scripts/download_models.py
 ```
 
-Then:
+Start:
 
 ```bash
 uvicorn backend.app:app --host 0.0.0.0 --port 8000
 ```
 
-Open `/` for the mobile-first Arabic client.
+Open `/` for the Arabic mobile client.
 
-## First synthesis
+## AI providers
 
-Use Egyptian Arabic (`ar-eg`). If you already ran the bootstrap, the model is already cached. Otherwise the first generation downloads the KemeTone assets automatically.
+The gateway supports OpenAI-compatible providers:
 
-```bash
-curl -X POST http://localhost:8000/api/synthesize \
-  -H 'content-type: application/json' \
-  -d '{"text":"النَّهَارْدَه الْجَوّ حِلْو أَوِي","dialect":"ar-eg","language":"ar","speed":1.0}' \
-  --output voice.wav
+- NVIDIA: `https://integrate.api.nvidia.com/v1`
+- UniKey: `https://www.getunikey.ai/v1`
+
+Configure keys only through environment variables or your deployment secret manager. **Never put API keys in the frontend, APK, Git repository, logs, or screenshots.**
+
+Copy `.env.example` to your deployment environment and set:
+
+```env
+NVIDIA_API_KEY=
+NVIDIA_MODEL=openai/gpt-oss-20b
+UNIKEY_API_KEY=
+UNIKEY_MODEL=unikey-router
 ```
 
-Environment variables:
+The API supports explicit provider selection and automatic fallback:
 
-- `VOICE_KEMETONE_MODEL` — model repository, default `Rabe3/kemetone`.
-- `VOICE_MODEL_CACHE` — local Hugging Face cache root, default `~/.cache/voice/models`.
-- `VOICE_OUTPUT_DIR` — generated WAV directory, default `./outputs`.
+```bash
+curl -X POST http://localhost:8000/api/ai/chat \
+  -H 'content-type: application/json' \
+  -d '{"provider":"auto","messages":[{"role":"user","content":"اكتب تحية مصرية قصيرة"}]}'
+```
+
+Automatic routing tries configured providers in order, optionally honoring `preferred_provider`, and only falls back after a provider request fails. Provider credentials are never returned by status endpoints.
 
 ## API
 
@@ -88,15 +97,23 @@ Environment variables:
 - `POST /api/prepare`
 - `GET /api/system/capabilities`
 - `GET /api/engine/route`
-- `POST /api/synthesize` → WAV audio
+- `GET /api/ai/providers`
+- `GET /api/ai/health`
+- `GET /api/ai/{provider}/models`
+- `POST /api/ai/chat` — explicit provider or `provider=auto`
+- `POST /api/synthesize` — generated 24 kHz WAV
 
 ## Hardware routing
 
-The router prefers a local GPU on capable machines and falls back to the lightweight KemeTone CPU path for lower-resource systems. Extremely constrained machines remain eligible for a future remote-worker path rather than pretending that local inference is safe.
+The runtime detects RAM/CPU and, when PyTorch CUDA is available, GPU VRAM. The router can select a local GPU path, CPU path, or a future remote worker based on available resources. No remote inference is falsely advertised as implemented.
 
-## Egyptian Arabic limitations
+## Environment
 
-KemeTone is Cairo/Egyptian focused, single-speaker, conversational-neutral, and does not provide multi-speaker cloning. It also expects Egyptian Arabic rather than generic MSA. Long text should be split at sentence boundaries.
+- `VOICE_KEMETONE_MODEL` — default `Rabe3/kemetone`
+- `VOICE_MODEL_CACHE` — default `~/.cache/voice/models`
+- `VOICE_OUTPUT_DIR` — default `./outputs`
+- `NVIDIA_API_KEY`, `NVIDIA_MODEL`
+- `UNIKEY_API_KEY`, `UNIKEY_MODEL`
 
 ## Tests
 
@@ -104,8 +121,8 @@ KemeTone is Cairo/Egyptian focused, single-speaker, conversational-neutral, and 
 pytest -q
 ```
 
-GitHub Actions runs the core test suite on pushes and pull requests. TTS model downloads are intentionally not performed in CI because the model is a large binary dependency.
+GitHub Actions runs the core suite without downloading model weights.
 
 ## Responsible use
 
-Use synthetic speech and voice cloning only with appropriate permission and in compliance with the model license and applicable law. KemeTone's model card specifically asks users not to impersonate the modeled person and to disclose synthetic speech where listeners could otherwise mistake it for human audio.
+Use synthetic speech and voice cloning only with appropriate permission and in compliance with the applicable license and law. Do not use the service to impersonate a person without authorization. Disclose synthetic speech when listeners could otherwise mistake it for human speech.
