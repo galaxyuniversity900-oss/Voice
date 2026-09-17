@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from backend.app import app
 from backend.dialect_pipeline import preprocess
 from backend.hardware import HardwareProfile, select_engine
+from backend.providers.ai_gateway import AIGateway
 
 client = TestClient(app)
 
@@ -69,3 +70,29 @@ def test_unknown_ai_provider():
         json={"provider": "unknown", "messages": [{"role": "user", "content": "hello"}]},
     )
     assert response.status_code == 404
+
+
+def test_ai_status_contains_no_secret(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "top-secret")
+    status = AIGateway().status()
+    assert status[0]["configured"] is True
+    assert all("top-secret" not in str(item) for item in status)
+
+
+def test_auto_chat_requires_provider(monkeypatch):
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    monkeypatch.delenv("UNIKEY_API_KEY", raising=False)
+    try:
+        AIGateway().auto_chat([{"role": "user", "content": "hello"}])
+    except RuntimeError as exc:
+        assert "No AI provider" in str(exc)
+    else:
+        raise AssertionError("auto_chat should fail when no provider is configured")
+
+
+def test_speed_is_restricted_to_supported_kemetone_value():
+    response = client.post(
+        "/api/prepare",
+        json={"text": "مرحبا", "dialect": "ar-eg", "speed": 1.5},
+    )
+    assert response.status_code == 422
