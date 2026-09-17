@@ -14,7 +14,7 @@ from .hardware_probe import detect_hardware
 from .frontend import FRONTEND_DIR
 from .providers.ai_gateway import AIGateway
 
-app = FastAPI(title="Voice API", version="0.5.0")
+app = FastAPI(title="Voice API", version="0.6.0")
 registry = build_registry()
 ai_gateway = AIGateway()
 
@@ -24,13 +24,14 @@ class SynthesisRequest(BaseModel):
     language: str = "ar"
     dialect: str = "ar-eg"
     voice: str | None = None
-    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    speed: float = Field(default=1.0, ge=1.0, le=1.0)
 
 
 class AIChatRequest(BaseModel):
-    provider: str
+    provider: str = "auto"
     messages: list[dict[str, str]] = Field(min_length=1)
     temperature: float = Field(default=0.2, ge=0, le=2)
+    preferred_provider: str | None = None
 
 
 @app.get("/health")
@@ -53,7 +54,12 @@ def prepare(req: SynthesisRequest):
 
 @app.get("/api/ai/providers")
 def ai_providers():
-    return {"configured": ai_gateway.configured(), "providers": ["nvidia", "unikey"]}
+    return {"configured": ai_gateway.configured(), "providers": ai_gateway.status()}
+
+
+@app.get("/api/ai/health")
+def ai_health():
+    return {"providers": ai_gateway.status(), "configured": ai_gateway.configured()}
 
 
 @app.get("/api/ai/{provider}/models")
@@ -69,9 +75,13 @@ def ai_models(provider: str):
 @app.post("/api/ai/chat")
 def ai_chat(req: AIChatRequest):
     try:
+        if req.provider.lower() == "auto":
+            return ai_gateway.auto_chat(req.messages, req.temperature, req.preferred_provider)
         return ai_gateway.chat(req.provider, req.messages, req.temperature)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception:
         raise HTTPException(status_code=503, detail="AI provider is unavailable")
 
