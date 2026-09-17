@@ -4,6 +4,7 @@ import importlib
 import os
 import sys
 import threading
+import uuid
 from pathlib import Path
 
 from .base import AudioResult, SynthesisOptions
@@ -59,7 +60,8 @@ class KemeToneEngine:
                 )
             )
             self._model_dir = model_dir
-            sys.path.insert(0, str(model_dir))
+            if str(model_dir) not in sys.path:
+                sys.path.insert(0, str(model_dir))
             from kemetone import EgyptianG2P
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -68,7 +70,14 @@ class KemeToneEngine:
                 config=str(model_dir / "config.json"),
                 model=str(model_dir / "kemetone.pth"),
             ).to(device).eval()
-            voice = torch.load(model_dir / "voices" / "kemetone.pt", map_location=device)
+            try:
+                voice = torch.load(
+                    model_dir / "voices" / "kemetone.pt",
+                    map_location=device,
+                    weights_only=True,
+                )
+            except TypeError:
+                voice = torch.load(model_dir / "voices" / "kemetone.pt", map_location=device)
 
             self._device = device
             self._model = model
@@ -94,8 +103,13 @@ class KemeToneEngine:
 
         output_dir = Path(os.getenv("VOICE_OUTPUT_DIR", "./outputs")).resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / "voice.wav"
-        tmp_path = output_dir / "voice.tmp.wav"
-        sf.write(tmp_path, audio.detach().cpu().numpy(), SAMPLE_RATE, format="WAV")
-        os.replace(tmp_path, output_path)
+        token = uuid.uuid4().hex
+        output_path = output_dir / f"voice-{token}.wav"
+        tmp_path = output_dir / f".{token}.tmp.wav"
+        try:
+            sf.write(tmp_path, audio.detach().cpu().numpy(), SAMPLE_RATE, format="WAV")
+            os.replace(tmp_path, output_path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
         return AudioResult(output_path, SAMPLE_RATE, self.name)
